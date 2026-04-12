@@ -1479,7 +1479,7 @@ async fn resolve_host_credentials(
             &mapping.secret_name,
             role_lookup,
             oauth_refresh.filter(|config| config.secret_name == mapping.secret_name),
-            crate::auth::DefaultFallback::AdminOnly,
+            crate::auth::DefaultFallback::Denied,
         )
         .await
         {
@@ -3464,7 +3464,9 @@ mod tests {
 
     #[cfg(feature = "libsql")]
     #[tokio::test]
-    async fn test_resolve_host_credentials_fallback_to_default_for_admin_user() {
+    /// Regression test for #2069: even admin users must NOT fall back to
+    /// "default" scope credentials. Cross-tenant fallback is removed entirely.
+    async fn test_resolve_host_credentials_no_fallback_for_admin_user() {
         use crate::secrets::{CredentialLocation, CredentialMapping, SecretsStore};
         use crate::tools::wasm::capabilities::HttpCapability;
         use crate::tools::wasm::wrapper::resolve_host_credentials;
@@ -3505,7 +3507,7 @@ mod tests {
         };
 
         // Resolve credentials for a different user (routine context)
-        // Should fallback to "default" and find the token
+        // Must NOT fallback to "default" — cross-tenant fallback removed (#2069)
         let result = resolve_host_credentials(
             &caps,
             Some(&store),
@@ -3515,8 +3517,15 @@ mod tests {
         )
         .await;
 
-        assert!(!result.is_empty(), "fallback to default"); // safety: test code only
-        assert_eq!(result[0].secret_value, "global_token_value"); // safety: test code only
+        assert!(
+            result.is_empty(),
+            "admin user must not fall back to default scope credentials"
+        );
+        assert_eq!(
+            result.missing_required,
+            vec!["google_oauth_token".to_string()],
+            "missing required credential should be reported"
+        );
     }
 
     #[cfg(feature = "libsql")]

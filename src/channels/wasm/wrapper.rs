@@ -1079,13 +1079,10 @@ impl WasmChannel {
 
     /// Load broadcast metadata from settings store on startup.
     ///
-    /// # Legacy migration (remove after ownership model rollout — tracked in #2100)
-    ///
-    /// If no metadata is found under `self.owner_scope_id`, a second lookup
-    /// under `"default"` is attempted for backward compatibility with instances
-    /// that stored broadcast metadata before the ownership model migration.
-    /// Remove this fallback once all deployments have run the
-    /// `migrate_default_owner` bootstrap step and restarted at least once.
+    /// Reads only from the channel's `owner_scope_id`. No fallback to
+    /// "default" scope -- channels that stored metadata under the legacy
+    /// "default" scope will re-persist it under the correct owner scope on
+    /// the next incoming message. (#2100)
     async fn load_broadcast_metadata(&self) {
         if let Some(ref store) = self.settings_store {
             match store
@@ -1099,31 +1096,7 @@ impl WasmChannel {
                         "Restored broadcast metadata from settings"
                     );
                 }
-                Ok(_) => {
-                    // LEGACY MIGRATION: remove after ownership model rollout — tracked in #2100
-                    if self.owner_scope_id != "default" {
-                        match store
-                            .get_setting("default", &self.broadcast_metadata_key())
-                            .await
-                        {
-                            Ok(Some(serde_json::Value::String(meta))) => {
-                                *self.last_broadcast_metadata.write().await = Some(meta);
-                                tracing::debug!(
-                                    channel = %self.name,
-                                    "Restored legacy owner broadcast metadata from default scope"
-                                );
-                            }
-                            Ok(_) => {}
-                            Err(e) => {
-                                tracing::warn!(
-                                    channel = %self.name,
-                                    "Failed to load legacy broadcast metadata: {}",
-                                    e
-                                );
-                            }
-                        }
-                    }
-                }
+                Ok(_) => {}
                 Err(e) => {
                     tracing::warn!(
                         channel = %self.name,
